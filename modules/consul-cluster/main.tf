@@ -16,7 +16,10 @@ terraform {
 resource "aws_autoscaling_group" "autoscaling_group" {
   name_prefix = var.cluster_name
 
-  launch_configuration = aws_launch_configuration.launch_configuration.name
+  launch_template {
+    id      = aws_launch_template.launch_template.id
+    version = "$Latest"
+  }
 
   availability_zones  = var.availability_zones
   vpc_zone_identifier = var.subnet_ids
@@ -85,45 +88,48 @@ resource "aws_autoscaling_group" "autoscaling_group" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# CREATE LAUNCH CONFIGURATION TO DEFINE WHAT RUNS ON EACH INSTANCE IN THE ASG
+# CREATE LAUNCH TEMPLATE TO DEFINE WHAT RUNS ON EACH INSTANCE IN THE ASG
 # ---------------------------------------------------------------------------------------------------------------------
 
-resource "aws_launch_configuration" "launch_configuration" {
+resource "aws_launch_template" "launch_template" {
   name_prefix   = "${var.cluster_name}-"
   image_id      = var.ami_id
   instance_type = var.instance_type
-  user_data     = var.user_data
-  spot_price    = var.spot_price
+  user_data     = base64encode(var.user_data)
 
-  iam_instance_profile = var.enable_iam_setup ? element(
-    concat(aws_iam_instance_profile.instance_profile.*.name, [""]),
-    0,
-  ) : var.iam_instance_profile_name
+  iam_instance_profile {
+    name = var.enable_iam_setup ? element(
+      concat(aws_iam_instance_profile.instance_profile.*.name, [""]),
+      0,
+    ) : var.iam_instance_profile_name
+  }
+  
   key_name = var.ssh_key_name
 
-  security_groups = concat(
-    [aws_security_group.lc_security_group.id],
-    var.additional_security_group_ids,
-  )
-  placement_tenancy           = var.tenancy
-  associate_public_ip_address = var.associate_public_ip_address
+  network_interfaces {
+    security_groups = concat(
+      [aws_security_group.lc_security_group.id],
+      var.additional_security_group_ids,
+    )
+    associate_public_ip_address = var.associate_public_ip_address
+  }
+
+  placement {
+    tenancy = var.tenancy
+  }
 
   ebs_optimized = var.root_volume_ebs_optimized
 
-  root_block_device {
-    volume_type           = var.root_volume_type
-    volume_size           = var.root_volume_size
-    delete_on_termination = var.root_volume_delete_on_termination
-    encrypted             = var.root_volume_encrypted
+  block_device_mappings {
+    device_name = "/dev/xvda"  # You may need to adjust this based on your AMI
+    ebs {
+      volume_type           = var.root_volume_type
+      volume_size           = var.root_volume_size
+      delete_on_termination = var.root_volume_delete_on_termination
+      encrypted             = var.root_volume_encrypted
+    }
   }
 
-  # Important note: whenever using a launch configuration with an auto scaling group, you must set
-  # create_before_destroy = true. However, as soon as you set create_before_destroy = true in one resource, you must
-  # also set it in every resource that it depends on, or you'll get an error about cyclic dependencies (especially when
-  # removing resources). For more info, see:
-  #
-  # https://www.terraform.io/docs/providers/aws/r/launch_configuration.html
-  # https://terraform.io/docs/configuration/resources.html
   lifecycle {
     create_before_destroy = true
   }
@@ -138,7 +144,7 @@ resource "aws_security_group" "lc_security_group" {
   description = "Security group for the ${var.cluster_name} launch configuration"
   vpc_id      = var.vpc_id
 
-  # aws_launch_configuration.launch_configuration in this module sets create_before_destroy to true, which means
+  # aws_launch_template.launch_template in this module sets create_before_destroy to true, which means
   # everything it depends on, including this resource, must set it as well, or you'll get cyclic dependency errors
   # when you try to do a terraform destroy.
   lifecycle {
@@ -221,7 +227,7 @@ resource "aws_iam_instance_profile" "instance_profile" {
   path        = var.instance_profile_path
   role        = element(concat(aws_iam_role.instance_role.*.name, [""]), 0)
 
-  # aws_launch_configuration.launch_configuration in this module sets create_before_destroy to true, which means
+  # aws_launch_template.launch_template in this module sets create_before_destroy to true, which means
   # everything it depends on, including this resource, must set it as well, or you'll get cyclic dependency errors
   # when you try to do a terraform destroy.
   lifecycle {

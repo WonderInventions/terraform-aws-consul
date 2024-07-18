@@ -154,12 +154,6 @@ variable "associate_public_ip_address" {
   default     = false
 }
 
-variable "spot_price" {
-  description = "The maximum hourly price to pay for EC2 Spot Instances."
-  type        = number
-  default     = null
-}
-
 variable "tenancy" {
   description = "The tenancy of the instance. Must be one of: null, default or dedicated. For EC2 Spot Instances only null or dedicated can be used."
   type        = string
