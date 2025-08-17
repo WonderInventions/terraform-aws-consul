@@ -11,6 +11,13 @@ readonly SYSTEMD_CONFIG_PATH="/etc/systemd/system/consul.service"
 readonly EC2_INSTANCE_METADATA_URL="http://169.254.169.254/latest/meta-data"
 readonly EC2_INSTANCE_DYNAMIC_DATA_URL="http://169.254.169.254/latest/dynamic"
 
+# Support IMDSv2 when required. Falls back to IMDSv1 if allowed.
+function _get_imds_token {
+  curl --silent --show-error -X PUT "http://169.254.169.254/latest/api/token" \
+       -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true
+}
+IMDS_TOKEN="$(_get_imds_token || true)"
+
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_NAME="$(basename "$0")"
 
@@ -112,12 +119,24 @@ function assert_not_empty {
 
 function lookup_path_in_instance_metadata {
   local -r path="$1"
-  curl --silent --show-error --location "$EC2_INSTANCE_METADATA_URL/$path/"
+  if [[ -n "$IMDS_TOKEN" ]]; then
+    curl --silent --show-error --location \
+         -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+         "$EC2_INSTANCE_METADATA_URL/$path/"
+  else
+    curl --silent --show-error --location "$EC2_INSTANCE_METADATA_URL/$path/"
+  fi
 }
 
 function lookup_path_in_instance_dynamic_data {
   local -r path="$1"
-  curl --silent --show-error --location "$EC2_INSTANCE_DYNAMIC_DATA_URL/$path/"
+  if [[ -n "$IMDS_TOKEN" ]]; then
+    curl --silent --show-error --location \
+         -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+         "$EC2_INSTANCE_DYNAMIC_DATA_URL/$path/"
+  else
+    curl --silent --show-error --location "$EC2_INSTANCE_DYNAMIC_DATA_URL/$path/"
+  fi
 }
 
 function get_instance_ip_address {
@@ -129,7 +148,12 @@ function get_instance_id {
 }
 
 function get_instance_region {
-  lookup_path_in_instance_dynamic_data "instance-identity/document" | jq -r ".region"
+  local region=""
+  region=$(lookup_path_in_instance_dynamic_data "instance-identity/document" | jq -r ".region" 2>/dev/null || true)
+  if [[ -z "$region" || "$region" == "null" ]]; then
+    region=$(lookup_path_in_instance_metadata "placement/region" 2>/dev/null || true)
+  fi
+  echo "$region"
 }
 
 function get_instance_tags {
