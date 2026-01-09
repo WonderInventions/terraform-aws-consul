@@ -121,7 +121,7 @@ resource "aws_launch_template" "launch_template" {
   ebs_optimized = var.root_volume_ebs_optimized
 
   block_device_mappings {
-    device_name = "/dev/xvda"  # You may need to adjust this based on your AMI
+    device_name = "/dev/sda1"  # You may need to adjust this based on your AMI
     ebs {
       volume_type           = var.root_volume_type
       volume_size           = var.root_volume_size
