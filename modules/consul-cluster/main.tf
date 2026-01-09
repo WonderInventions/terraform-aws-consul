@@ -130,6 +130,21 @@ resource "aws_launch_template" "launch_template" {
     }
   }
 
+  # Dedicated Consul data volume (separate from root) to reduce Raft/fsync jitter
+  block_device_mappings {
+    device_name = "/dev/sdf"
+
+    ebs {
+      volume_type           = "gp3"
+      volume_size           = 20
+      iops                  = 3000
+      throughput            = 125
+      delete_on_termination = true
+      encrypted             = var.root_volume_encrypted
+    }
+  }
+
+
   lifecycle {
     create_before_destroy = true
   }
